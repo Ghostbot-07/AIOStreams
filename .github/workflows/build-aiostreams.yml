@@ -1,4 +1,4 @@
-name: Build AIOStreams (Frontend + Backend, No Cache)
+name: Build AIOStreams (frontend + backend, no cache)
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
 
     steps:
       # ─────────────────────────────────────────────
-      # Checkout & version resolution
+      # 1. Checkout & Versioning
       # ─────────────────────────────────────────────
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
         run: git checkout ${{ steps.version.outputs.version }}
 
       # ─────────────────────────────────────────────
-      # Tooling
+      # 2. Setup Environment
       # ─────────────────────────────────────────────
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
@@ -55,7 +55,7 @@ jobs:
         run: pnpm install
 
       # ─────────────────────────────────────────────
-      # Build steps
+      # 3. Build Everything
       # ─────────────────────────────────────────────
       - name: 🧱 Build core
         run: pnpm --filter @aiostreams/core run build
@@ -67,7 +67,7 @@ jobs:
         run: pnpm --filter @aiostreams/frontend run build
 
       # ─────────────────────────────────────────────
-      # Metadata generation
+      # 4. Generate Metadata
       # ─────────────────────────────────────────────
       - name: 🏷️ Generate build metadata
         run: |
@@ -83,26 +83,28 @@ jobs:
           EOF
 
       # ─────────────────────────────────────────────
-      # Artifact assembly
+      # 5. Assemble Artifact (Locally)
       # ─────────────────────────────────────────────
       - name: 📦 Prepare final artifact structure
         run: |
-          mkdir -p /tmp/aiostreams-artifact/packages/core
-          mkdir -p /tmp/aiostreams-artifact/packages/server
-          mkdir -p /tmp/aiostreams-artifact/packages/frontend
-          mkdir -p /tmp/aiostreams-artifact/resources
+          mkdir -p final-artifact/packages/core
+          mkdir -p final-artifact/packages/server
+          mkdir -p final-artifact/packages/frontend
+          mkdir -p final-artifact/resources
 
-          cp -r packages/core/dist /tmp/aiostreams-artifact/packages/core/
-          cp -r packages/server/dist /tmp/aiostreams-artifact/packages/server/
-          cp -r packages/frontend/out /tmp/aiostreams-artifact/packages/frontend/
-          cp resources/metadata.json /tmp/aiostreams-artifact/resources/
+          cp -r packages/core/dist final-artifact/packages/core/
+          cp -r packages/server/dist final-artifact/packages/server/
+          cp -r packages/frontend/out final-artifact/packages/frontend/
+          cp resources/metadata.json final-artifact/resources/
 
       # ─────────────────────────────────────────────
-      # Upload
+      # 6. Upload
       # ─────────────────────────────────────────────
       - name: ⬆️ Upload artifact (24h retention)
         uses: actions/upload-artifact@v4
         with:
           name: aiostreams-${{ steps.version.outputs.version }}
-          path: /tmp/aiostreams-artifact/*
+          # Using 'final-artifact/*' tells GitHub: 
+          # "Take everything INSIDE this folder and put it at the root of the zip"
+          path: final-artifact/*
           retention-days: 1
