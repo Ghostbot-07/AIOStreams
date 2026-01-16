@@ -54,9 +54,14 @@ jobs:
       - name: 🎨 Build frontend (static export)
         run: pnpm --filter @aiostreams/frontend run build
 
+      - name: 📦 Prepare artifact structure
+        run: |
+          mkdir -p /tmp/final-artifact
+          cp -r packages/frontend/out /tmp/final-artifact/
+
       - name: ⬆️ Upload artifact (24h retention)
         uses: actions/upload-artifact@v4
         with:
           name: frontend-${{ steps.version.outputs.version }}
-          path: packages/frontend/out/
+          path: /tmp/final-artifact/
           retention-days: 1
