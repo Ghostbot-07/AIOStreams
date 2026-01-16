@@ -104,5 +104,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aiostreams-${{ steps.version.outputs.version }}
-          path: /tmp/aiostreams-artifact/
+          path: /tmp/aiostreams-artifact/*
           retention-days: 1
