@@ -1,0 +1,75 @@
+name: Build Backend (Manual, No Cache)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏷️ Fetch upstream tags
+        # Fetches tags directly from the official repo to ensure we see new releases
+        # even if your fork is outdated.
+        run: git fetch https://github.com/viren070/aiostreams.git --tags
+
+      - name: 🏷️ Resolve latest STABLE release tag
+        id: version
+        run: |
+          # Filters tags to find strictly vX.X.X (ignoring nightly/beta/rc)
+          STABLE_TAG=$(git tag --list \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -n 1)
+
+          if [ -z "$STABLE_TAG" ]; then
+            echo "❌ No stable tag found"
+            exit 1
+          fi
+
+          echo "Using stable tag: $STABLE_TAG"
+          echo "version=$STABLE_TAG" >> $GITHUB_OUTPUT
+
+      - name: 🔁 Checkout stable tag
+        run: git checkout ${{ steps.version.outputs.version }}
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 📦 Install dependencies
+        run: pnpm install
+
+      - name: 🧱 Build core
+        run: pnpm --filter @aiostreams/core run build
+
+      - name: ⚙️ Build server
+        run: pnpm --filter @aiostreams/server run build
+
+      - name: 📦 Prepare artifact structure
+        # We create the folder structure so you can unzip it directly over your existing project
+        run: |
+          mkdir -p /tmp/backend-artifact/packages/core
+          mkdir -p /tmp/backend-artifact/packages/server
+          
+          # Copy only the compiled dist folders
+          cp -r packages/core/dist /tmp/backend-artifact/packages/core/
+          cp -r packages/server/dist /tmp/backend-artifact/packages/server/
+
+      - name: ⬆️ Upload artifact (24h retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ steps.version.outputs.version }}
+          path: /tmp/backend-artifact/
+          retention-days: 1
