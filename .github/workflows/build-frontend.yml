@@ -1,0 +1,62 @@
+name: Build Frontend (Manual, No Cache)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏷️ Fetch upstream tags
+        run: git fetch https://github.com/viren070/aiostreams.git --tags
+
+      - name: 🏷️ Resolve latest STABLE release tag
+        id: version
+        run: |
+          STABLE_TAG=$(git tag --list \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -n 1)
+
+          if [ -z "$STABLE_TAG" ]; then
+            echo "❌ No stable tag found"
+            exit 1
+          fi
+
+          echo "Using stable tag: $STABLE_TAG"
+          echo "version=$STABLE_TAG" >> $GITHUB_OUTPUT
+
+      - name: 🔁 Checkout stable tag
+        run: git checkout ${{ steps.version.outputs.version }}
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 📦 Install dependencies
+        run: pnpm install
+
+      - name: 🧱 Build core
+        run: pnpm --filter @aiostreams/core run build
+
+      - name: 🎨 Build frontend (static export)
+        run: pnpm --filter @aiostreams/frontend run build
+
+      - name: ⬆️ Upload artifact (24h retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-${{ steps.version.outputs.version }}
+          path: packages/frontend/out/
+          retention-days: 1
