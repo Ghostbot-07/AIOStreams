@@ -2,6 +2,20 @@ name: Build AIOStreams (Frontend + Backend, no cache)
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        required: false
+        default: "stable"
+        type: choice
+        options:
+          - stable
+          - nightly
+
+      version:
+        description: "Git tag to build"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -19,23 +33,41 @@ jobs:
       - name: 🏷️ Fetch upstream tags
         run: git fetch https://github.com/viren070/aiostreams.git --tags
 
-      - name: 🏷️ Resolve latest STABLE release tag
+      - name: 🏷️ Resolve version to build
         id: version
         run: |
-          STABLE_TAG=$(git tag --list \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V \
-            | tail -n 1)
+          CHANNEL="${{ github.event.inputs.channel }}"
+          INPUT_VERSION="${{ github.event.inputs.version }}"
 
-          if [ -z "$STABLE_TAG" ]; then
-            echo "❌ No stable tag found"
-            exit 1
+          echo "Selected channel: $CHANNEL"
+
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+            echo "Using user-specified version: $VERSION"
+          else
+            if [ "$CHANNEL" = "stable" ]; then
+              VERSION=$(git tag --list \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -V \
+                | tail -n 1)
+            else
+              VERSION=$(git tag --list \
+                | grep -E 'nightly' \
+                | sort -V \
+                | tail -n 1)
+            fi
+
+            if [ -z "$VERSION" ]; then
+              echo "❌ No version found for channel: $CHANNEL"
+              exit 1
+            fi
+
+            echo "Auto-selected version: $VERSION"
           fi
 
-          echo "Using stable tag: $STABLE_TAG"
-          echo "version=$STABLE_TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: 🔁 Checkout stable tag
+      - name: 🔁 Checkout selected version
         run: git checkout ${{ steps.version.outputs.version }}
 
       # ─────────────────────────────────────────────
@@ -70,17 +102,7 @@ jobs:
       # Metadata
       # ─────────────────────────────────────────────
       - name: 🏷️ Generate build metadata
-        run: |
-          mkdir -p resources
-          cat <<EOF > resources/metadata.json
-          {
-            "version": "${{ steps.version.outputs.version }}",
-            "environment": "production",
-            "gitCommit": "$(git rev-parse HEAD)",
-            "buildTime": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-            "commitTime": "$(git show -s --format=%cI HEAD)"
-          }
-          EOF
+        run: pnpm run metadata
 
       # ─────────────────────────────────────────────
       # Artifact assembly (flat)
