@@ -24,6 +24,11 @@ const TITLE_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days
 const AUTHORISATION_CACHE_TTL = 2 * 24 * 60 * 60; // 2 days
 
 // Zod schemas for API responses
+const GenreSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+});
+
 const MovieDetailsSchema = z.object({
   id: z.number(),
   title: z.string(),
@@ -31,6 +36,8 @@ const MovieDetailsSchema = z.object({
   status: z.string(),
   original_title: z.string().optional(),
   original_language: z.string().optional(),
+  runtime: z.number().nullable().optional(),
+  genres: z.array(GenreSchema).optional(),
 });
 
 const TVDetailsSchema = z.object({
@@ -41,12 +48,14 @@ const TVDetailsSchema = z.object({
   status: z.string(),
   original_title: z.string().optional(),
   original_language: z.string().optional(),
+  episode_run_time: z.array(z.number()).optional(),
   seasons: z.array(
     z.object({
       season_number: z.number(),
       episode_count: z.number(),
     })
   ),
+  genres: z.array(GenreSchema).optional(),
 });
 
 const MovieAlternativeTitlesSchema = z.object({
@@ -304,8 +313,9 @@ export class TMDBMetadata {
       | Array<{ season_number: number; episode_count: number }>
       | undefined;
     let allTitles: string[] = [];
-    let imdbId: string | undefined =
-      parsedId.type === 'imdbId' ? parsedId.value.toString() : undefined;
+    let originalLanguage: string | undefined;
+    let runtime: number | undefined;
+    let genres: string[] = [];
 
     if (parsedId.mediaType === 'movie') {
       const movieData = MovieDetailsSchema.parse(detailsJson);
@@ -316,7 +326,10 @@ export class TMDBMetadata {
       if (movieData.original_title) {
         allTitles.push(movieData.original_title);
       }
+      originalLanguage = movieData.original_language;
       releaseDate = movieData.release_date;
+      runtime = movieData.runtime || undefined;
+      genres = movieData.genres?.map((g) => g.name) ?? [];
     } else {
       const tvData = TVDetailsSchema.parse(detailsJson);
       primaryTitle =
@@ -326,11 +339,20 @@ export class TMDBMetadata {
       if (tvData.original_title) {
         allTitles.push(tvData.original_title);
       }
+      originalLanguage = tvData.original_language;
       releaseDate = tvData.first_air_date ?? undefined;
       yearEnd = tvData.last_air_date
         ? this.parseReleaseDate(tvData.last_air_date)
         : undefined;
       seasons = tvData.seasons;
+      if (tvData.episode_run_time && tvData.episode_run_time.length > 0) {
+        // Calculate average runtime
+        runtime = Math.round(
+          tvData.episode_run_time.reduce((a, b) => a + b, 0) /
+            tvData.episode_run_time.length
+        );
+      }
+      genres = tvData.genres?.map((g) => g.name) ?? [];
     }
 
     allTitles.push(primaryTitle);
@@ -385,9 +407,12 @@ export class TMDBMetadata {
       releaseDate: releaseDate,
       year: Number(year),
       yearEnd: yearEnd ? Number(yearEnd) : undefined,
+      originalLanguage,
       seasons,
       tmdbId: Number(tmdbId),
       tvdbId: null,
+      runtime: runtime,
+      genres: genres.length > 0 ? genres : undefined,
     };
     // Cache the result
     TMDBMetadata.metadataCache.set(cacheKey, metadata, TITLE_CACHE_TTL);

@@ -175,9 +175,8 @@ export const FORMATTER_DETAILS: Record<FormatterType, FormatterDetail> = {
   },
   [MINIMALISTIC_GDRIVE_FORMATTER]: {
     id: MINIMALISTIC_GDRIVE_FORMATTER,
-    name: 'Minimalistic Google Drive',
-    description:
-      'A minimalistic formatter for Google Drive which shows only the bare minimum',
+    name: 'Minimalistic',
+    description: 'A minimalistic formatter which shows only the bare minimum',
   },
   [TORRENTIO_FORMATTER]: {
     id: TORRENTIO_FORMATTER,
@@ -876,6 +875,7 @@ const AUDIO_CHANNELS = ['2.0', '5.1', '6.1', '7.1', 'Unknown'] as const;
 // Passthrough stages that can be selectively bypassed
 const PASSTHROUGH_STAGES = [
   'filter', // bypass main filtering (shouldKeepStream)
+  'language', // bypass language filtering specifically
   'dedup', // bypass deduplication
   'limit', // bypass result limiting
   'excluded', // bypass excluded stream expressions
@@ -918,10 +918,14 @@ const SORT_CRITERIA = [
   'keyword',
   'streamExpressionMatched',
   'seadex',
+  'bitrate',
 ] as const;
 
 export const MIN_SIZE = 0;
 export const MAX_SIZE = 100 * 1000 * 1000 * 1000; // 100GB
+
+export const MIN_BITRATE = 0;
+export const MAX_BITRATE = 250 * 1000 * 1000; // 250 Mbps
 
 export const MIN_SEEDERS = 0;
 export const MAX_SEEDERS = 1000;
@@ -1114,6 +1118,13 @@ export const SORT_CRITERIA_DETAILS: Record<
     descendingDescription:
       'Streams that are marked as the Best release on SeaDex are preferred, followed by the Alternative release',
   },
+  bitrate: {
+    name: 'Bitrate (Estimate)',
+    defaultDirection: 'desc',
+    description: 'Sort by the bitrate of the stream',
+    ascendingDescription: 'Streams with lower bitrate are preferred',
+    descendingDescription: 'Streams with higher bitrate are preferred',
+  },
 } as const;
 
 const SORT_DIRECTIONS = ['asc', 'desc'] as const;
@@ -1259,6 +1270,7 @@ const LANGUAGES = [
   'Dual Audio',
   'Dubbed',
   'Multi',
+  'Original',
   'Unknown',
 ] as const;
 

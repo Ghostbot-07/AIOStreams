@@ -18,6 +18,19 @@ export function formatBytes(
   return value + ' ' + sizes[i];
 }
 
+export function formatBitrate(bitrate: number, round: boolean = false): string {
+  if (!Number.isFinite(bitrate) || bitrate <= 0) return '0 bps';
+  const k = 1000;
+  const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
+  const i = Math.min(
+    sizes.length - 1,
+    Math.max(0, Math.floor(Math.log(bitrate) / Math.log(k)))
+  );
+  let value = bitrate / Math.pow(k, i);
+  value = round ? Math.round(value) : parseFloat(value.toFixed(1));
+  return `${value} ${sizes[i]}`;
+}
+
 export function formatDuration(durationInMs: number): string {
   const seconds = Math.floor(durationInMs / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -83,6 +96,21 @@ export function languageToCode(language: string): string | undefined {
     return selectedLang.iso_639_1.toUpperCase();
   }
   return undefined;
+}
+
+export function iso6391ToLanguage(code: string): string | undefined {
+  const langs = FULL_LANGUAGE_MAPPING.filter(
+    (lang) => lang.iso_639_1?.toLowerCase() === code.toLowerCase()
+  );
+
+  if (langs.length === 0) {
+    return undefined;
+  }
+
+  const selectedLang = langs.find((lang) => lang.flag_priority) ?? langs[0];
+  return (selectedLang.internal_english_name || selectedLang.english_name)
+    .split(/;|\(/)[0]
+    .trim();
 }
 
 export function emojiToLanguage(emoji: string): string | undefined {
