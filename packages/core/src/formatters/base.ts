@@ -3,12 +3,14 @@ import * as constants from '../utils/constants.js';
 import { createLogger } from '../utils/logger.js';
 import {
   formatBytes,
+  formatSmartBytes,
   formatBitrate,
   formatDuration,
   formatHours,
   languageToCode,
   languageToEmoji,
   makeSmall,
+  formatSmartBitrate,
 } from './utils.js';
 import { Env } from '../utils/env.js';
 
@@ -75,6 +77,9 @@ export interface ParseValue {
     audioTags: string[] | null;
     releaseGroup: string | null;
     regexMatched: string | null;
+    rankedRegexMatched: string[];
+    regexScore: number | null;
+    nRegexScore: number | null; // normalised (0-100) regex score
     encode: string | null;
     audioChannels: string[] | null;
     edition: string | null;
@@ -112,6 +117,18 @@ export interface ParseValue {
     proxied: boolean;
     seadex: boolean;
     seadexBest: boolean;
+    seScore: number | null;
+    nSeScore: number | null; // normalised (0-100) based on max and min scores (neg scores become 0)
+    seMatched: string | null;
+    rseMatched: string[];
+  };
+  metadata?: {
+    queryType: string | null;
+    title: string | null;
+    runtime: number | null;
+    genres: string[] | null;
+    year: number | null;
+    episodeRuntime: number | null;
   };
   service?: {
     id: string | null;
@@ -145,9 +162,41 @@ type CompiledVariableWInsertFn = {
  */
 type CompiledModifiedVariableFn = (parseValue: ParseValue) => ResolvedVariable;
 
+export interface FormatterContext {
+  userData: UserData;
+  // From ExpressionContext
+  type?: string;
+  isAnime?: boolean;
+  queryType?: string;
+  season?: number;
+  episode?: number;
+  title?: string;
+  titles?: string[];
+  year?: number;
+  yearEnd?: number;
+  genres?: string[];
+  runtime?: number;
+  episodeRuntime?: number;
+  absoluteEpisode?: number;
+  relativeAbsoluteEpisode?: number;
+  originalLanguage?: string;
+  daysSinceRelease?: number;
+  hasNextEpisode?: boolean;
+  daysUntilNextEpisode?: number;
+  daysSinceFirstAired?: number;
+  daysSinceLastAired?: number;
+  latestSeason?: number;
+  anilistId?: number;
+  malId?: number;
+  hasSeaDex?: boolean;
+  maxSeScore?: number;
+  maxRegexScore?: number;
+}
+
 export abstract class BaseFormatter {
   protected config: FormatterConfig;
   protected userData: UserData;
+  protected formatterContext: FormatterContext;
 
   private regexBuilder: BaseFormatterRegexBuilder;
   private precompiledNameFunction: CompiledParseFunction | null = null;
@@ -155,9 +204,10 @@ export abstract class BaseFormatter {
 
   private _compilationPromise: Promise<void>;
 
-  constructor(config: FormatterConfig, userData: UserData) {
+  constructor(config: FormatterConfig, ctx: FormatterContext) {
     this.config = config;
-    this.userData = userData;
+    this.userData = ctx.userData;
+    this.formatterContext = ctx;
 
     this.regexBuilder = new BaseFormatterRegexBuilder(
       this.convertStreamToParseValue({} as ParsedStream)
@@ -192,12 +242,9 @@ export abstract class BaseFormatter {
   }
 
   protected convertStreamToParseValue(stream: ParsedStream): ParseValue {
-    const resolvedOriginalLanguage = stream.parsedFile?.languages
-      ?.find((l) => l.startsWith('Original-'))
-      ?.replace('Original-', '');
-    const languages =
-      stream.parsedFile?.languages?.filter((l) => !l.startsWith('Original-')) ||
-      null;
+    // Get original language from formatter context instead of from the stream's languages array hack
+    const resolvedOriginalLanguage = this.formatterContext.originalLanguage;
+    const languages = stream.parsedFile?.languages || null;
 
     const rawUserLanguages = [
       ...(this.userData.preferredLanguages || []),
@@ -327,7 +374,28 @@ export abstract class BaseFormatter {
         visualTags: stream.parsedFile?.visualTags || null,
         audioTags: stream.parsedFile?.audioTags || null,
         releaseGroup: stream.parsedFile?.releaseGroup || null,
-        regexMatched: stream.regexMatched?.name || null,
+        regexMatched:
+          stream.regexMatched?.name || stream.rankedRegexesMatched?.[0] || null,
+        rankedRegexMatched:
+          stream.rankedRegexesMatched?.filter(
+            (name): name is string => typeof name === 'string'
+          ) || [],
+        regexScore: stream.regexScore ?? null,
+        nRegexScore:
+          stream.regexScore != undefined &&
+          this.formatterContext.maxRegexScore != undefined &&
+          this.formatterContext.maxRegexScore > 0
+            ? Math.max(
+                0,
+                Math.min(
+                  100,
+                  Math.round(
+                    (stream.regexScore / this.formatterContext.maxRegexScore) *
+                      100
+                  )
+                )
+              )
+            : null,
         encode: stream.parsedFile?.encode || null,
         audioChannels: stream.parsedFile?.audioChannels || null,
         indexer: stream.indexer || null,
@@ -366,6 +434,36 @@ export abstract class BaseFormatter {
         extension: stream.parsedFile?.extension || null,
         seadex: stream.seadex?.isSeadex ?? false,
         seadexBest: stream.seadex?.isBest ?? false,
+        nSeScore:
+          stream.streamExpressionScore != undefined &&
+          this.formatterContext.maxSeScore != undefined &&
+          this.formatterContext.maxSeScore > 0
+            ? Math.max(
+                0,
+                Math.min(
+                  100,
+                  Math.round(
+                    (stream.streamExpressionScore /
+                      this.formatterContext.maxSeScore) *
+                      100
+                  )
+                )
+              )
+            : null,
+        seScore: stream.streamExpressionScore ?? null,
+        seMatched: stream.streamExpressionMatched?.name || null,
+        rseMatched:
+          stream.rankedStreamExpressionsMatched?.filter(
+            (name): name is string => typeof name === 'string'
+          ) || [],
+      },
+      metadata: {
+        queryType: this.formatterContext.queryType || null,
+        title: this.formatterContext.title || null,
+        runtime: this.formatterContext.runtime || null,
+        episodeRuntime: this.formatterContext.episodeRuntime || null,
+        genres: this.formatterContext.genres || null,
+        year: this.formatterContext.year || null,
       },
       addon: {
         name: stream.addon?.name || null,
@@ -676,7 +774,7 @@ export abstract class BaseFormatter {
     fullStringModifiers: {
       mod_tzlocale: string | undefined;
     }
-  ): string | boolean | undefined {
+  ): string | boolean | any[] | undefined {
     const _mod = mod;
     mod = mod.toLowerCase();
 
@@ -714,6 +812,11 @@ export abstract class BaseFormatter {
             .find((key) => mod.startsWith(key))!!;
 
           // Pre-process string value and check to allow for intuitive comparisons
+          const arrayValue =
+            Array.isArray(variable) &&
+            variable.every((item) => typeof item === 'string')
+              ? variable.map((item) => item.toLowerCase())
+              : undefined;
           const stringValue = variable.toString().toLowerCase();
           let stringCheck = mod.substring(modPrefix.length).toLowerCase();
           // remove whitespace from stringCheck if it isn't in stringValue
@@ -730,11 +833,14 @@ export abstract class BaseFormatter {
             ['<', '<=', '>', '>=', '='].includes(modPrefix) &&
             !isNaN(parsedNumericValue) &&
             !isNaN(parsedNumericCheck);
+          const isArraySupported = ['$', '^', '~'].includes(modPrefix);
 
           conditional = ModifierConstants.conditionalModifiers.prefix[
             modPrefix as keyof typeof ModifierConstants.conditionalModifiers.prefix
           ](
-            isNumericComparison ? (parsedNumericValue as any) : stringValue,
+            isNumericComparison
+              ? (parsedNumericValue as any)
+              : (isArraySupported ? arrayValue : undefined) || stringValue,
             isNumericComparison ? (parsedNumericCheck as any) : stringCheck
           );
         }
@@ -789,10 +895,25 @@ export abstract class BaseFormatter {
       if (mod in ModifierConstants.arrayModifiers)
         return ModifierConstants.arrayModifiers[
           mod as keyof typeof ModifierConstants.arrayModifiers
-        ](variable)?.toString();
+        ](variable);
 
       // handle hardcoded modifiers here
       switch (true) {
+        case mod.startsWith('slice(') && mod.endsWith(')'): {
+          // Extract the start and end indices from slice(start, end)
+          const args = _mod
+            .substring(6, _mod.length - 1)
+            .split(',')
+            .map((arg) => parseInt(arg.trim(), 10));
+
+          const start = args[0];
+          const end = args.length > 1 && !isNaN(args[1]) ? args[1] : undefined;
+
+          if (!isNaN(start)) {
+            return variable.slice(start, end);
+          }
+          return variable;
+        }
         case mod.startsWith('join(') && mod.endsWith(')'): {
           // Extract the separator from join('separator') or join("separator")
           const separator = _mod.substring(6, _mod.length - 2);
@@ -931,6 +1052,40 @@ class ModifierConstants {
 
   static arrayModifierGetOrDefault = (value: string[], i: number) =>
     value.length > 0 ? String(value[i]) : '';
+
+  static getSortModifier = (ascending: boolean) => {
+    return (value: string[] | number[]) =>
+      [...value].sort((a, b) => {
+        let result: number;
+        if (typeof a === 'number' && typeof b === 'number') {
+          result = a - b;
+        } else {
+          const strA = String(a);
+          const strB = String(b);
+          result = strA.localeCompare(strB, undefined, { numeric: true });
+        }
+        return ascending ? result : -result;
+      });
+  };
+
+  static getStarModifier = (padWithEmpty: boolean) => {
+    return (value: number) => {
+      const enum Star {
+        Full = '★',
+        Half = '⯪',
+        Empty = '☆',
+      }
+      const fullStars = Math.floor(value / 20);
+      const halfStars = value % 20 >= 10 ? 1 : 0;
+      const emptyStars = 5 - fullStars - halfStars;
+      return (
+        Star.Full.repeat(fullStars) +
+        Star.Half.repeat(halfStars) +
+        (padWithEmpty ? Star.Empty.repeat(emptyStars) : '')
+      );
+    };
+  };
+
   static arrayModifiers = {
     join: (value: string[]) => value.join(', '),
     length: (value: string[]) => value.length.toString(),
@@ -942,8 +1097,11 @@ class ModifierConstants {
         value,
         Math.floor(Math.random() * value.length)
       ),
-    sort: (value: string[]) => [...value].sort(),
+    sort: this.getSortModifier(true),
+    rsort: this.getSortModifier(false),
+    lsort: (value: any[]) => [...value].sort(),
     reverse: (value: string[]) => [...value].reverse(),
+    string: (value: string[]) => value.toString(),
   };
 
   static numberModifiers = {
@@ -952,6 +1110,9 @@ class ModifierConstants {
     octal: (value: number) => value.toString(8),
     binary: (value: number) => value.toString(2),
     bytes: (value: number) => formatBytes(value, 1000),
+    sbytes: (value: number) => formatSmartBytes(value, 1000),
+    sbytes10: (value: number) => formatSmartBytes(value, 1000),
+    sbytes2: (value: number) => formatSmartBytes(value, 1024),
     rbytes: (value: number) => formatBytes(value, 1000, true),
     bytes10: (value: number) => formatBytes(value, 1000),
     rbytes10: (value: number) => formatBytes(value, 1000, true),
@@ -959,8 +1120,11 @@ class ModifierConstants {
     rbytes2: (value: number) => formatBytes(value, 1024, true),
     bitrate: (value: number) => formatBitrate(value),
     rbitrate: (value: number) => formatBitrate(value, true),
+    sbitrate: (value: number) => formatSmartBitrate(value),
     string: (value: number) => value.toString(),
     time: (value: number) => formatDuration(value),
+    star: this.getStarModifier(false),
+    pstar: this.getStarModifier(true),
   };
 
   static conditionalModifiers = {
@@ -978,10 +1142,16 @@ class ModifierConstants {
     },
 
     prefix: {
-      $: (value: string, check: string) => value.startsWith(check),
-      '^': (value: string, check: string) => value.endsWith(check),
-      '~': (value: string, check: string) => value.includes(check),
-      '=': (value: string, check: string) => value == check,
+      $: (value: string | string[], check: string) =>
+        typeof value === 'string'
+          ? value.startsWith(check)
+          : value?.[0] === check,
+      '^': (value: string | string[], check: string) =>
+        typeof value === 'string'
+          ? value.endsWith(check)
+          : value?.[value.length - 1] === check,
+      '~': (value: string | string[], check: string) => value.includes(check),
+      '=': (value: string, check: string) => value === check,
       '>=': (value: string | number, check: string | number) => value >= check,
       '>': (value: string | number, check: string | number) => value > check,
       '<=': (value: string | number, check: string | number) => value <= check,
@@ -997,6 +1167,8 @@ class ModifierConstants {
     "join('.*?')": null,
     'join(".*?")': null,
     'truncate(\\d+)': null,
+    'slice(\\s*\\d+\\s*)': null,
+    'slice(\\s*\\d+\\s*,\\s*\\d+\\s*)': null,
     '$.*?': null,
     '^.*?': null,
     '~.*?': null,

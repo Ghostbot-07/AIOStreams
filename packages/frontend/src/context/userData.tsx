@@ -4,6 +4,7 @@ import {
   QUALITIES,
   RESOLUTIONS,
   SERVICE_DETAILS,
+  DEFAULT_PRECACHE_SELECTOR,
 } from '../../../core/src/utils/constants';
 import { useStatus } from './status';
 
@@ -161,9 +162,61 @@ export function applyMigrations(config: any): UserData {
     }
   }
 
+  // migrate alwaysPrecache to precacheCondition, then precacheCondition to precacheSelector
+  if (config.precacheSelector === undefined && config.precacheNextEpisode) {
+    // First handle the old precacheCondition field
+    if (config.precacheCondition !== undefined) {
+      // Convert condition to selector format
+      config.precacheSelector = `${config.precacheCondition} ? uncached(streams) : []`;
+    } else {
+      // Handle even older alwaysPrecache field
+      config.precacheSelector =
+        config.alwaysPrecache === true
+          ? 'true ? uncached(streams) : []'
+          : DEFAULT_PRECACHE_SELECTOR;
+    }
+  }
+  delete config.alwaysPrecache;
+  delete config.precacheCondition;
+
   return config;
 }
-const DefaultUserData: UserData = {
+
+export function removeInvalidPresetReferences(config: UserData) {
+  // remove references to non-existent presets in options:
+  const existingPresetIds = config.presets?.map((preset) => preset.instanceId);
+  if (config.proxy) {
+    config.proxy.proxiedAddons = config.proxy.proxiedAddons?.filter((addon) =>
+      existingPresetIds?.includes(addon)
+    );
+  }
+  if (config.yearMatching) {
+    config.yearMatching.addons = config.yearMatching.addons?.filter((addon) =>
+      existingPresetIds?.includes(addon)
+    );
+  }
+  if (config.titleMatching) {
+    config.titleMatching.addons = config.titleMatching.addons?.filter((addon) =>
+      existingPresetIds?.includes(addon)
+    );
+  }
+  if (config.seasonEpisodeMatching) {
+    config.seasonEpisodeMatching.addons =
+      config.seasonEpisodeMatching.addons?.filter((addon) =>
+        existingPresetIds?.includes(addon)
+      );
+  }
+  if (config.groups?.groupings) {
+    config.groups.groupings = config.groups.groupings.map((group) => ({
+      ...group,
+      addons: group.addons?.filter((addon) =>
+        existingPresetIds?.includes(addon)
+      ),
+    }));
+  }
+  return config;
+}
+export const DefaultUserData: UserData = {
   services: Object.values(SERVICE_DETAILS).map((service) => ({
     id: service.id,
     enabled: false,
@@ -184,11 +237,19 @@ const DefaultUserData: UserData = {
         direction: 'desc',
       },
       {
+        key: 'library',
+        direction: 'desc',
+      },
+      {
         key: 'resolution',
         direction: 'desc',
       },
       {
-        key: 'library',
+        key: 'quality',
+        direction: 'desc',
+      },
+      {
+        key: 'streamExpressionScore',
         direction: 'desc',
       },
       {
@@ -234,6 +295,42 @@ const DefaultUserData: UserData = {
     uncached: 'per_service',
     p2p: 'single_result',
   },
+  autoPlay: {
+    enabled: true,
+    method: 'matchingFile',
+    attributes: ['resolution', 'quality', 'releaseGroup'],
+  },
+  cacheAndPlay: {
+    enabled: false,
+    streamTypes: ['usenet'],
+  },
+  statistics: {
+    enabled: false,
+    position: 'bottom',
+    statsToShow: ['addon', 'filter'],
+  },
+  digitalReleaseFilter: {
+    enabled: false,
+    tolerance: 0,
+    requestTypes: [],
+    addons: [],
+  },
+  ageRangeTypes: ['usenet'],
+  seasonEpisodeMatching: {
+    addons: [],
+    requestTypes: [],
+  },
+  yearMatching: {
+    addons: [],
+    requestTypes: [],
+  },
+  titleMatching: {
+    addons: [],
+    requestTypes: [],
+  },
+  precacheSelector: DEFAULT_PRECACHE_SELECTOR,
+  enableSeadex: true,
+  regexOverrides: [],
 };
 
 interface UserDataContextType {

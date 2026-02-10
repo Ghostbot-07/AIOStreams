@@ -47,8 +47,8 @@ import {
   StreamContext,
 } from './streams/index.js';
 import { getAddonName } from './utils/general.js';
-import { TMDBMetadata } from './metadata/tmdb.js';
 import { Metadata } from './metadata/utils.js';
+import { StreamSelector } from './parser/streamExpression.js';
 const logger = createLogger('core');
 
 const shuffleCache = Cache.getInstance<string, MetaPreview[]>('shuffle');
@@ -101,6 +101,7 @@ export class AIOStreams {
   private deduplicator: Deduplicator;
   private sorter: Sorter;
   private precomputer: Precomputer;
+  private streamContext: StreamContext | null = null;
 
   private addonInitialisationErrors: {
     addon: Addon | Preset;
@@ -186,6 +187,8 @@ export class AIOStreams {
     );
 
     const context = StreamContext.create(type, id, this.userData);
+    // Store context for later retrieval
+    this.streamContext = context;
 
     const {
       streams,
@@ -230,7 +233,7 @@ export class AIOStreams {
       }
       if (precache) {
         setImmediate(() => {
-          this.precacheNextEpisode(type, id).catch((error) => {
+          this.precacheNextEpisode(context).catch((error) => {
             logger.error('Error during precaching:', {
               error: error instanceof Error ? error.message : String(error),
               type,
@@ -300,6 +303,17 @@ export class AIOStreams {
       },
       errors: errors,
     };
+  }
+
+  /**
+   * Get the stream context created during the last getStreams call.
+   * This provides access to metadata and other contextual information.
+   * The context can be used to create a FormatterContext with streams data.
+   *
+   * @returns The StreamContext or null if getStreams hasn't been called yet
+   */
+  public getStreamContext(): StreamContext | null {
+    return this.streamContext;
   }
 
   /**
@@ -2114,24 +2128,6 @@ export class AIOStreams {
     });
   }
 
-  private async getMetadata(parsedId: ParsedId): Promise<Metadata | undefined> {
-    try {
-      const metadata = await new TMDBMetadata({
-        accessToken: this.userData.tmdbAccessToken,
-        apiKey: this.userData.tmdbApiKey,
-      }).getMetadata(parsedId);
-      return metadata;
-    } catch (error) {
-      logger.warn(
-        `Error getting metadata for ${parsedId.fullId}, will not be able to precache next season if necessary`,
-        {
-          error: error instanceof Error ? error.message : String(error),
-        }
-      );
-      return undefined;
-    }
-  }
-
   private _getNextEpisode(
     currentSeason: number | undefined,
     currentEpisode: number,
@@ -2272,8 +2268,8 @@ export class AIOStreams {
     return initialResponse;
   }
 
-  private async precacheNextEpisode(type: string, id: string) {
-    const parsedId = IdParser.parse(id, type);
+  private async precacheNextEpisode(context: StreamContext) {
+    const { type, id, parsedId } = context;
     if (!parsedId) {
       return;
     }
@@ -2286,7 +2282,7 @@ export class AIOStreams {
       return;
     }
 
-    const metadata = await this.getMetadata(parsedId);
+    const metadata = await context.getMetadata();
 
     const { season: seasonToPrecache, episode: episodeToPrecache } =
       this._getNextEpisode(currentSeason, currentEpisode, metadata);
@@ -2308,7 +2304,9 @@ export class AIOStreams {
     // modify userData to remove the excludeUncached filter
     const userData = structuredClone(this.userData);
     userData.excludeUncached = false;
+    // ensure default fetching is used as time does not matter for a background precache
     userData.groups = undefined;
+    userData.dynamicAddonFetching = { enabled: false };
     this.setUserData(userData);
 
     const nextStreamsResponse = await this.getStreams(precacheId, type, true);
@@ -2319,37 +2317,46 @@ export class AIOStreams {
       return;
     }
 
-    const serviceStreams = nextStreamsResponse.data.streams.filter(
-      (stream) => stream.service
-    );
-    const shouldPrecache =
-      serviceStreams.every((stream) => stream.service?.cached === false) ||
-      this.userData.alwaysPrecache;
+    const nextStreams = nextStreamsResponse.data.streams;
 
-    if (!shouldPrecache) {
+    // Evaluate precache selector on the next episode's streams
+    let selectedStreams: ParsedStream[] = [];
+    const selector =
+      this.userData.precacheSelector || constants.DEFAULT_PRECACHE_SELECTOR;
+    try {
+      const streamSelector = new StreamSelector(context.toExpressionContext());
+      selectedStreams = await streamSelector.select(nextStreams, selector);
+      logger.debug(`Precache selector evaluated`, {
+        selector,
+        resultCount: selectedStreams.length,
+      });
+    } catch (error) {
+      logger.error(`Failed to evaluate precache selector`, {
+        selector,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (selectedStreams.length === 0) {
       logger.debug(
-        `Skipping precaching ${id} as all streams are cached or Always Precache is disabled`
+        `Skipping precaching ${id} as precache selector returned no streams`
       );
       return;
     }
 
-    const firstUncachedStream = serviceStreams.find(
-      (stream) => stream.service?.cached === false
-    );
-    if (!firstUncachedStream || !firstUncachedStream.url) {
-      logger.debug(
-        `Skipping precaching ${id} as no uncached streams were found or it had no URL`
-      );
+    const selectedStream = selectedStreams[0];
+    if (!selectedStream || !selectedStream.url) {
+      logger.debug(`Skipping precaching ${id} as selected stream had no URL`);
       return;
     }
 
     logger.debug(
-      `Selected following stream for precaching:\n${firstUncachedStream.originalName}\n${firstUncachedStream.originalDescription}`
+      `Selected following stream for precaching:\n${selectedStream.originalName}\n${selectedStream.originalDescription}`
     );
 
     try {
       const response = await this._fetchAndHandleRedirects(
-        firstUncachedStream,
+        selectedStream,
         precacheId
       );
       logger.debug(`Response: ${response.status} ${response.statusText}`);

@@ -132,21 +132,26 @@ const API_VERSION = 1;
 
 export const REDIS_PREFIX = 'aiostreams:';
 
+export const DEFAULT_PRECACHE_SELECTOR =
+  'count(cached(streams)) == 0 ? uncached(streams) : []';
+
 export const GDRIVE_FORMATTER = 'gdrive';
 export const LIGHT_GDRIVE_FORMATTER = 'lightgdrive';
 export const MINIMALISTIC_GDRIVE_FORMATTER = 'minimalisticgdrive';
 export const TORRENTIO_FORMATTER = 'torrentio';
 export const TORBOX_FORMATTER = 'torbox';
 export const PRISM_FORMATTER = 'prism';
+export const TAMTARO_FORMATTER = 'tamtaro';
 export const CUSTOM_FORMATTER = 'custom';
 
 export const FORMATTERS = [
   GDRIVE_FORMATTER,
+  PRISM_FORMATTER,
+  TAMTARO_FORMATTER,
   LIGHT_GDRIVE_FORMATTER,
   MINIMALISTIC_GDRIVE_FORMATTER,
   TORRENTIO_FORMATTER,
   TORBOX_FORMATTER,
-  PRISM_FORMATTER,
   CUSTOM_FORMATTER,
 ] as const;
 
@@ -162,16 +167,22 @@ export const FORMATTER_DETAILS: Record<FormatterType, FormatterDetail> = {
     name: 'Google Drive',
     description: 'Uses the formatting from the Stremio GDrive addon',
   },
+  [PRISM_FORMATTER]: {
+    id: PRISM_FORMATTER,
+    name: 'Prism',
+    description: 'An aesthetic formatter with every detail within 5 lines.',
+  },
+  [TAMTARO_FORMATTER]: {
+    id: TAMTARO_FORMATTER,
+    name: 'Tamtaro',
+    description:
+      "From Tamtaro's setup. Minimal and clean, yet comprehensive for stream selection. Smartly detects status for cached (⚡/⏳), proxied (⛊/⛉), library (☁︎/▤), and season packs (⧉/◧). The last line in sᴍᴀʟʟ ᴄᴀᴘs highlights special attributes like Usenet's health (☑ ɴᴢʙ), SeaDex (ᴀʟᴛ/ʙᴇsᴛ ʀᴇʟᴇᴀsᴇ), SEL scores (ʀᴇᴍᴜx ᴛ𝟷 ₁,₉₅₀), networks (ɴᴇᴛғʟɪx) and special editions (ᴅɪʀᴇᴄᴛᴏʀ's ᴄᴜᴛ).",
+  },
   [LIGHT_GDRIVE_FORMATTER]: {
     id: LIGHT_GDRIVE_FORMATTER,
     name: 'Light Google Drive',
     description:
       'A lighter version of the GDrive formatter, focused on asthetics',
-  },
-  [PRISM_FORMATTER]: {
-    id: PRISM_FORMATTER,
-    name: 'Prism',
-    description: 'An aesthetic formatter with every detail within 5 lines.',
   },
   [MINIMALISTIC_GDRIVE_FORMATTER]: {
     id: MINIMALISTIC_GDRIVE_FORMATTER,
@@ -917,8 +928,11 @@ const SORT_CRITERIA = [
   'library',
   'keyword',
   'streamExpressionMatched',
+  'streamExpressionScore',
+  'regexScore',
   'seadex',
   'bitrate',
+  'releaseGroup',
 ] as const;
 
 export const MIN_SIZE = 0;
@@ -1101,13 +1115,14 @@ export const SORT_CRITERIA_DETAILS: Record<
       'Streams that match any of your keywords are preferred',
   },
   streamExpressionMatched: {
-    name: 'Stream Expression Matched',
+    name: 'Stream Expressions',
     defaultDirection: 'desc',
-    description: 'Whether the stream matches any of your stream expressions',
+    description:
+      'Whether the stream matches any of your preferred stream expressions',
     ascendingDescription:
-      'Streams that do not match your stream expressions are preferred while the ones that do are ranked by the order of your stream expressions',
+      'Streams that do not match your preferred stream expressions are preferred while the ones that do are ranked by the order of your preferred stream expressions',
     descendingDescription:
-      'Streams that match your stream expressions are preferred and ranked by the order of your stream expressions',
+      'Streams that match your preferred stream expressions are preferred and ranked by the order of your preferred stream expressions',
   },
   seadex: {
     name: 'SeaDex',
@@ -1124,6 +1139,30 @@ export const SORT_CRITERIA_DETAILS: Record<
     description: 'Sort by the bitrate of the stream',
     ascendingDescription: 'Streams with lower bitrate are preferred',
     descendingDescription: 'Streams with higher bitrate are preferred',
+  },
+  regexScore: {
+    name: 'Ranked Regex Score',
+    defaultDirection: 'desc',
+    description: 'Sort by the computed score from ranked regex patterns',
+    ascendingDescription: 'Streams with lower regex scores are preferred',
+    descendingDescription: 'Streams with higher regex scores are preferred',
+  },
+  streamExpressionScore: {
+    name: 'Stream Expression Score',
+    defaultDirection: 'desc',
+    description: 'Sort by the computed score from ranked stream expressions',
+    ascendingDescription: 'Streams with lower expression scores are preferred',
+    descendingDescription:
+      'Streams with higher expression scores are preferred',
+  },
+  releaseGroup: {
+    name: 'Release Group',
+    defaultDirection: 'desc',
+    description: 'Sort by the release group of the stream',
+    ascendingDescription:
+      'Streams that are not in your preferred release group list are preferred',
+    descendingDescription:
+      'Streams that are in your preferred release group list are preferred',
   },
 } as const;
 

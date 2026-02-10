@@ -135,7 +135,6 @@ class StreamParser {
     parsedStream.indexer = this.getIndexer(stream, parsedStream);
     parsedStream.service = this.getService(stream, parsedStream);
     parsedStream.duration = this.getDuration(stream, parsedStream);
-    parsedStream.bitrate = this.getBitrate(stream, parsedStream);
     parsedStream.type = this.getStreamType(
       stream,
       parsedStream.service,
@@ -143,6 +142,7 @@ class StreamParser {
     );
     parsedStream.library = this.getInLibrary(stream, parsedStream);
     parsedStream.age = this.getAge(stream, parsedStream);
+    parsedStream.bitrate = this.getBitrate(stream, parsedStream);
     parsedStream.message = this.getMessage(stream, parsedStream);
 
     parsedStream.parsedFile = this.getParsedFile(stream, parsedStream);
@@ -517,7 +517,7 @@ class StreamParser {
 
     // Detect season pack based on folder size being significantly larger than file size
     if (
-      seasonPack === undefined &&
+      !seasonPack &&
       episodes &&
       episodes.length > 0 && // to handle movie folders
       parsedStream.folderSize &&
@@ -527,7 +527,7 @@ class StreamParser {
       seasonPack = true;
     }
     // Detect season pack when more than 5 episodes are present
-    if (seasonPack === undefined && episodes && episodes.length > 5) {
+    if (!seasonPack && episodes && episodes.length > 5) {
       seasonPack = true;
     }
     return {
@@ -570,7 +570,7 @@ class StreamParser {
         arrayMerge(folderParsed?.languages, fileParsed?.languages),
         this.getLanguages(stream, parsedStream)
       ),
-      seasonPack: folderParsed?.seasonPack || fileParsed?.seasonPack,
+      seasonPack,
     };
   }
 
@@ -662,13 +662,13 @@ class StreamParser {
   ): ParsedStream['service'] | undefined {
     const cleanString = string.replace(/web-?dl/i, '');
     const services = constants.SERVICE_DETAILS;
-    const cachedSymbols = ['+', '⚡', '🚀', 'cached'];
-    const uncachedSymbols = ['⏳', 'download', 'UNCACHED'];
+    const cachedSymbols = ['+', '⚡', '🚀', 'cached', '🌩️'];
+    const uncachedSymbols = ['⏳', 'download', 'UNCACHED', '☁️'];
     let streamService: ParsedStream['service'] | undefined;
     Object.values(services).forEach((service) => {
       // for each service, generate a regexp which creates a regex with all known names separated by |
       const regex = new RegExp(
-        `(^|(?<![^ |[(_\\/\\-.]))(${service.knownNames.join('|')})(?=[ ⬇️⏳⚡+/|\\)\\]_.-]|$|\n)`,
+        `(^|(?<![^ |[(_\\/\\-.]))(${service.knownNames.join('|')})(?=[ ⬇️⏳⚡☁️🌩️+/|\\)\\]_.-]|$|\n)`,
         'im'
       );
       // check if the string contains the regex
